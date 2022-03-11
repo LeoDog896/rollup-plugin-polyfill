@@ -1,5 +1,7 @@
 const PROXY_SUFFIX = '?polyfill-entry';
 
+import type { Plugin } from "rollup"
+
 /**
  * rollup-plugin-polyfill
  * prepends entry files with a source file or module
@@ -8,7 +10,7 @@ const PROXY_SUFFIX = '?polyfill-entry';
  * @see https://github.com/JRJurman/rollup-plugin-polyfill
  *
  */
-module.exports = (packages) => ({
+export default (packages: string[]): Plugin => ({
   name: 'polyfill',
   options(rawOptions) {
     // We inject the resolver in the beginning so that "catch-all-resolvers"
@@ -72,7 +74,7 @@ module.exports = (packages) => ({
       // Namespace reexports do not reexport default, so we need special
       // handling here. We know ModuleInfo.hasDefaultExport is reliable because
       // we awaited this.load in resolveId.
-      if (this.getModuleInfo(entryId).hasDefaultExport) {
+      if (this.getModuleInfo(entryId)?.hasDefaultExport) {
         code += `export { default } from ${JSON.stringify(entryId)};\n`;
       }
       return code;

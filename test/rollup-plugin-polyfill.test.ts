@@ -1,7 +1,7 @@
-const path = require('path').posix;
-const {rollup} = require('rollup');
-const commonjs = require('@rollup/plugin-commonjs');
-const polyfill = require('..');
+import path from "path/posix"
+import { rollup, RollupBuild, OutputChunk, Plugin } from 'rollup';
+import commonjs from '@rollup/plugin-commonjs';
+import polyfill from '../src/index';
 
 it('injects a polyfill', async () => {
     const bundle = await rollup({
@@ -91,10 +91,13 @@ it('handles files promoted to entry points via this.emitFile', async () => {
             }),
             polyfill(['polyfill']),
             {
+                name: "otherJS",
                 transform(code, id) {
                     if (id === '/other.js') {
                         this.emitFile({type: 'chunk', id: '/other.js', fileName: 'other.js'})
                     }
+
+                    return { code };
                 }
             }
         ]
@@ -115,9 +118,12 @@ it('works if a plugin preloads entry points via this.load', async () => {
         input: '/main.js',
         plugins: [
             {
+                name: "resolve",
                 async resolveId(source, importer, options) {
                     const resolved = await this.resolve(source, importer, {...options, skipSelf: true});
-                    await this.load(resolved);
+                    const info = await this.load(resolved);
+                    
+                    return { id: info.id }
                 }
             },
             loader({
@@ -219,7 +225,7 @@ it('works with commonjs entry points', async () => {
 });
 
 // A simple plugin to resolve and load some virtual files
-function loader(modules) {
+function loader(modules: { [key: string]: string }): Plugin {
     return {
         name: 'loader',
         load(id) {
@@ -239,23 +245,24 @@ function loader(modules) {
 }
 
 // helpers to run tests with virtual files
-function requireWithContext(code, context) {
+function requireWithContext(code: string, context) {
     const module = {exports: {}};
     const contextWithExports = {...context, module, exports: module.exports};
     const contextKeys = Object.keys(contextWithExports);
     const contextValues = contextKeys.map((key) => contextWithExports[key]);
     try {
-        const fn = new Function(contextKeys, code);
+        const fn = new Function(contextKeys.toString(), code);
         fn.apply({}, contextValues);
     } catch (error) {
-        error.exports = module.exports;
+        if ((error as any).hasOwnProperty("exports"))
+          (error as any).exports = module.exports;
         throw error;
     }
     return contextWithExports.module.exports;
 }
 
-function runCodeFromChunkMap(chunkMap, entry) {
-    const requireFromOutputVia = (importer) => (source) => {
+function runCodeFromChunkMap(chunkMap: { [key: string]: string }, entry: string) {
+    const requireFromOutputVia = (importer: string) => (source: string) => {
         const outputId = path.join(path.dirname(importer), source);
         const code = chunkMap[outputId];
         if (typeof code !== 'undefined') {
@@ -285,25 +292,27 @@ function runCodeFromChunkMap(chunkMap, entry) {
     };
 }
 
-async function executeBundle(bundle, entry) {
+async function executeBundle(bundle: RollupBuild, entry: string) {
     const chunkMap = await getChunkMapFromBundle(bundle);
     try {
         return runCodeFromChunkMap(chunkMap, entry);
     } catch (error) {
-        error.message += `\n\n${stringifyChunkMap(chunkMap)}`
+        if (error instanceof Error) {
+          error.message += `\n\n${stringifyChunkMap(chunkMap)}`
+        }
         throw error;
     }
 }
 
-async function getChunkMapFromBundle(bundle) {
+async function getChunkMapFromBundle(bundle: RollupBuild) {
     const generated = await bundle.generate({exports: 'named', format: 'cjs'});
-    const chunkMap = {};
+    const chunkMap: { [key: string]: string } = {};
     for (const chunk of generated.output) {
-        chunkMap[chunk.fileName] = chunk.code;
+        chunkMap[chunk.fileName] = (chunk as OutputChunk).code;
     }
     return chunkMap;
 }
 
-function stringifyChunkMap(chunkMap) {
+function stringifyChunkMap(chunkMap: { [key: string]: string }) {
     return Object.keys(chunkMap).map(module => `===> ${module}\n${chunkMap[module]}`).join('\n\n');
 }
